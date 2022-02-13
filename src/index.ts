@@ -1,10 +1,10 @@
+import { fromNullable, isSome, Option } from 'fp-ts/lib/Option';
 import { createCanvas } from '../lib/auto-canvas';
+import { pathPolyline } from '../lib/ctx-util';
 import { Vector2 } from '../lib/types';
 import * as Vec2 from '../lib/vec2';
-import { startLoop } from './util';
-import { drawDisc, pathPolyline } from '../lib/ctx-util';
 import { Particle, simulateFluidParticles } from './fluid-simulation';
-import { flatten } from 'fp-ts/lib/Array';
+import { interpolate, startLoop } from './util';
 
 const makePointGrid = (startPoint: Vector2, stride: number, size: Vector2): Vector2[] => {
 	// const startPoint = Vec2.multiply(size, -stride / 2);
@@ -21,6 +21,16 @@ const makePointGrid = (startPoint: Vector2, stride: number, size: Vector2): Vect
 	}
 	return points;
 };
+
+function makeCenteredPointGrid(containerSize: Vector2, stride: number, size: Vector2): Vector2[] {
+	return makePointGrid(
+		[
+			(containerSize[0] - size[0] * stride) / 2,
+			(containerSize[1] - size[1] * stride) / 2,
+		],
+		stride, size
+	)
+}
 
 function makePointPyramid(startPoint: Vector2, stride: number, baseCount: number): Vector2[] {
 	let points: Vector2[] = [];
@@ -45,18 +55,25 @@ function randomOffset(): Vector2 {
 function createInitialParticles(radius: number, containerSize: Vector2): Particle[] {
 	// const maxStacking = containerSize.map(v => Math.floor(v / (2 * radius))) as Vector2;
 	return [
-		// ...makePointGrid([3.8, 0.2], radius, [12, 18])
-		// ...makePointPyramid([1.6, 0.1], radius, 18)
-		...flatten(
-			[[0.2, 0.2] as Vector2, [5.3, 0.2] as Vector2].map(
-				startPoint => makePointGrid(startPoint, radius, [8, 17])
-			)
+		...makeCenteredPointGrid(
+			containerSize, radius, [16, 16]
 		)
+		// ...makePointPyramid([1.6, 0.1], radius, 18)
+		// ...flatten(
+		// 	[[0.2, 0.2] as Vector2, [5.3, 0.2] as Vector2].map(
+		// 		startPoint => makePointGrid(startPoint, radius, [8, 17])
+		// 	)
+		// )
 	].map(position => ({
 		position: Vec2.add(position, Vec2.multiply(randomOffset(), 0.01)), 
 		velocity: [0, 0] 
 	}))
 }
+
+type SceneRotationControlState = {
+	targetValue: number,
+	rotationSpeed: number
+};
 
 function setupScene() {
 	const canvas = createCanvas(
@@ -64,29 +81,107 @@ function setupScene() {
 	);
 	const ctx = canvas.getContext("2d");
 	const backgroundColor = "#d4d3d2";
-	const sceneScale = 100;
+	const sceneScale = 100 / window.devicePixelRatio;
 	
-	const targetContainerSize: Vector2 = [8, 4];
+	const targetContainerSize: Vector2 = [6, 6];
 	const cellSize = 0.4;
 	const gridSize = targetContainerSize.map(v => Math.round(v / cellSize)) as Vector2;
 	const containerSize = gridSize.map(v => v * cellSize) as Vector2;
 	
 	const particleRadius = 0.2;
 	let particles = createInitialParticles(particleRadius, containerSize);
-	const forceField = () => [0, -3] as Vector2;
-	
+		
+
+	//instructions ###
+
+	document.body.insertAdjacentHTML(
+		"beforeend", 
+		`
+			<div 
+				style="
+					position: absolute; 
+					left: 0px; right: 0px; bottom: 0px; 
+					padding: 10px; 
+					display: flex; 
+					flex-direction: column; 
+					text-align: center;
+				"
+			>
+				<span>press space to pause/resume the simulation</span>
+				<span>use the left/right arrow keys to rotate the container</span>
+			</div>
+		`	
+	);
+		
+	//scene-rotation-control ###
+
+	let sceneRotationControlState: SceneRotationControlState = {
+		rotationSpeed: 0,
+		targetValue: 0
+	};
+	const setSceneRotationVelocity = (velocity: number) => {
+		sceneRotationControlState = {
+			...sceneRotationControlState,
+			rotationSpeed: velocity
+		};
+	};
+	const keyToSceneRotationVelocity: Record<string, number> = {
+		"ArrowRight": +2,
+		"ArrowLeft": -2
+	};
+	function getSceneRotationValueForKey(key: string): Option<number> {
+		return fromNullable(
+			keyToSceneRotationVelocity[key]
+		);
+	}
+	document.addEventListener("keydown", e => {
+		const nextSpeed = getSceneRotationValueForKey(e.key);
+		if (isSome(nextSpeed)){
+			setSceneRotationVelocity(nextSpeed.value);
+		}
+	});
+	document.addEventListener("keyup", e => {
+		const nextSpeed = getSceneRotationValueForKey(e.key);
+		if (isSome(nextSpeed)) {
+			setSceneRotationVelocity(0);
+		}
+	});
+
+	let sceneRotation = 0;
+
+	function updateSceneControlAndRotation(dt: number){
+		sceneRotationControlState = {
+			...sceneRotationControlState,
+			targetValue: sceneRotationControlState.targetValue + sceneRotationControlState.rotationSpeed * dt
+		};
+		sceneRotation = interpolate(
+			sceneRotation,
+			sceneRotationControlState.targetValue,
+			8 * dt
+		);
+	}
+
+
+	const gravityStrength = 3;
+
 
 	const render = () => {
 		const { canvas } = ctx;
-		const [w, h] = [canvas.width, canvas.height];
+		const [w, h] = [canvas.clientWidth, canvas.clientHeight];
 
 		ctx.save();
+		const pr = devicePixelRatio;
+		ctx.scale(pr, pr);
 		ctx.fillStyle = backgroundColor;
 		ctx.fillRect(0, 0, w, h);
 		ctx.translate(w / 2, h / 2);
 		ctx.scale(sceneScale, -sceneScale);
 		
-		ctx.translate(-containerSize[0] / 2, -containerSize[1] / 2);
+		ctx.rotate(sceneRotation);
+		ctx.translate(
+			-containerSize[0] / 2, 
+			-containerSize[1] / 2
+		);
 
 		//render grid ###
 		ctx.globalAlpha = 0.1;
@@ -123,11 +218,18 @@ function setupScene() {
 		ctx.restore();
 	};
 
-	const simFunc = simulateFluidParticles({
-		cellSize, gridSize, particleRadius, forceField
-	});
-
+	
 	const updateAndRender = (dt: number) => {
+		updateSceneControlAndRotation(dt);
+
+		const gravityVector: Vector2 = [
+			-Math.sin(sceneRotation) * gravityStrength,
+			-Math.cos(sceneRotation) * gravityStrength
+		];
+		const simFunc = simulateFluidParticles({
+			cellSize, gridSize, particleRadius, 
+			forceField: () => gravityVector
+		});
 		particles = simFunc(dt)(particles);
 		render();
 	};
@@ -150,6 +252,10 @@ function setupScene() {
 	);
 
 	render();
+	setTimeout(
+		() => simRunning = true,
+		1000
+	);
 }
 
 setupScene();
