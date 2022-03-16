@@ -1,14 +1,14 @@
 
-# particle-based fluid simulation (attempt)
+# ballpit-sim-2d
 
-https://particle-based-fluid.netlify.app/
+https://ballpit-sim-2d.netlify.app/
 
 <img src="./readme-data/app-demo.gif" style="width: 500px;" />
 
 # about  
 
-in September 2021, i attempted this fluid simulation with particles only.  
-it turned out not as fluid as i'd hoped but hey, it's something!  
+in September 2021, i attempted a fluid simulation with particles only.  
+it turned out not as fluid as i'd hoped so now it's a ballpit simulation instead.  
 
 <img src="./readme-data/pyramid.gif" style="width: 500px;" />
 
